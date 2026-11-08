@@ -1,0 +1,10 @@
+torch>=1.13
+numpy
+imageio
+imageio-ffmpeg
+opencv-python-headless
+tqdm
+matplotlib
+packaging
+tensorboard
+
