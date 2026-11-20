@@ -1,0 +1,15 @@
+# Tiny CPU run on the generated toy scene (python scripts/make_toy_scene.py).
+# Narrower network (128 instead of 256) and fewer samples so 2,000 steps take ~6 minutes on a CPU.
+expname: smoke
+datadir: data/toy_scene
+netwidth: 128
+n_samples: 32
+n_importance: 32
+n_rand: 256
+n_iters: 2000
+lrate_decay_steps: 2000
+precrop_iters: 100
+ray_chunk: 4096
+i_print: 50
+i_img: 500
+i_weights: 500

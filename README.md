@@ -1,103 +1,68 @@
 # NeRF: Novel View Synthesis
 
-A computer vision project implementing Neural Radiance Fields in PyTorch. Given posed images of a scene, the model learns a continuous radiance field and renders views from new camera positions.
+A PyTorch implementation of [Neural Radiance Fields (NeRF)](https://arxiv.org/abs/2003.08934) for Blender-format scenes. Given calibrated RGB images of a scene, it learns a continuous 3D representation and renders RGB and depth from new camera poses.
 
-**Project maintainer: Yawen Zheng**
+- Positional encoding and an eight-layer MLP predict volume density and view-dependent color.
+- Stratified samples feed a coarse model; importance sampling adds points where the coarse model predicts more contribution. The renderer integrates color and density along each camera ray.
+- The training loop tracks coarse and fine losses, validation images, and learning rate in TensorBoard. Evaluation produces held-out renders, depth maps, and image-quality metrics. A separate script renders a camera orbit.
 
-## Implementation
+## Quick start
 
-- Coarse and fine NeRF MLPs, each configured with 8 hidden layers and 256 units per layer.
-- Sinusoidal encodings for 3D positions and viewing directions.
-- Stratified coarse sampling and inverse-CDF hierarchical importance sampling.
-- Differentiable volume rendering with RGB reconstruction loss for both networks.
-- Adam optimization, learning-rate decay, and 1,024 sampled rays per training step.
-- Chunked network evaluation and rendering, checkpoint saving, and TensorBoard loss/PSNR logging.
-
-## Setup
-
-Use Python 3.9 or later. Install the dependencies from the repository root:
+Use Python 3.10+ and install the requirements in a virtual environment.
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
+
+# Generate a small local scene and verify the training/evaluation workflow.
+python scripts/make_toy_scene.py --out data/toy_scene
+python train.py --config configs/smoke.yaml --device cpu
+python evaluate.py --expdir logs/smoke --lpips none --device cpu
 ```
 
-The code chooses CUDA, Apple MPS, or CPU based on availability. Full training is compute intensive; runtime depends on the scene and hardware.
+## Blender Lego
 
-## Dataset
-
-Download the Blender synthetic dataset (`nerf_synthetic`) linked from the [original NeRF repository](https://github.com/bmild/nerf). Place it under `data/nerf_synthetic/` at the repository root.
-
-Each scene directory, such as `data/nerf_synthetic/lego/`, should contain `transforms_train.json`, `transforms_val.json`, `transforms_test.json`, and the corresponding image folders.
-
-Supported scene names are `chair`, `drums`, `ficus`, `hotdog`, `lego`, `materials`, `mic`, and `ship`. Datasets, pretrained checkpoints, and rendered videos are not bundled.
-
-## Train
-
-Run commands from the `code/` directory:
+Put the Lego scene under `data/nerf_synthetic/lego`, or use the download helper below. The scene directory must contain `transforms_train.json`, `transforms_val.json`, and `transforms_test.json` along with the image files referenced by those manifests.
 
 ```bash
-cd code
-python run.py --object lego --expname lego_nerf --no_reload
+bash scripts/download_blender.sh
+python train.py --config configs/lego_paper.yaml
+python evaluate.py --expdir logs/lego_paper --split test --testskip 1 --lpips vgg
+python render_video.py --expdir logs/lego_paper --frames 120
+tensorboard --logdir logs
 ```
 
-To enable validation during training:
+| Config | Resolution | Coarse + additional fine samples | Steps |
+|---|---:|---:|---:|
+| `configs/lego_paper.yaml` | 800 × 800 | 64 + 128 | 500,000 |
+| `configs/lego_quick.yaml` | 400 × 400 | 64 + 64 | 100,000 |
 
-```bash
-python run.py --object lego --expname lego_nerf --no_reload --use_validation
-```
+The full-resolution config uses 1,024 rays per optimization step, as in the authors’ [released Blender configuration](https://github.com/bmild/nerf/blob/master/paper_configs/blender_config.txt). This implementation also center-crops ray sampling for the first 500 steps, uses PyTorch's default layer initialization, and enables TF32 where supported when `tf32: true`. The quick config is a separate setting, not a substitute for the full-resolution protocol. Ray and MLP point chunk sizes are configurable to bound the working batches; input tensors and accumulated outputs still consume memory.
 
-Additional hyperparameters are defined in `code/params.py`.
+### Checkpointing and evaluation
 
-## Render from a checkpoint
+- Re-run the same training command to resume from the latest completed checkpoint. Changing the data, model, or optimization recipe requires a new `expname`. You can increase `n_iters` without changing the learning-rate schedule. Work after the last checkpoint may be lost if you interrupt training.
+- Checkpoints contain model, optimizer, step, and random number generator state. New checkpoints use tensors and primitives so they can be loaded with PyTorch's restricted loader. Prefer checkpoints you produced yourself; never use `--trust-legacy-checkpoint` on files from untrusted sources.
+- `evaluate.py` creates a separate output directory per invocation. Its `metrics.json` contains mean and per-image PSNR, SSIM, and optionally LPIPS, along with resolution, split/stride, effective config, device, checkpoint hash, manifest hash, and LPIPS backbone. Choose `--lpips alex` to use AlexNet or `--lpips none` to skip it. LPIPS may download its backbone weights on first use.
+- For a full Lego test-set evaluation use `--split test --testskip 1`; the official split contains 200 views. The [original NeRF paper, Table 4](https://arxiv.org/pdf/2003.08934), reports 32.54 PSNR, 0.961 SSIM, and 0.050 LPIPS for Lego. Those are the paper authors' reference values, not measurements from this implementation.
 
-With the default coarse/fine configuration, training saves checkpoints to `logs/weights/fine/single/<scene>/`. Once that directory contains a compatible checkpoint, run:
+## Code map
 
-```bash
-cd code
-python run.py --object lego --expname lego_nerf --render_only
-```
+| Component | Location |
+|---|---|
+| Blender data and camera rays | [`nerf/data.py`](nerf/data.py) |
+| Positional encoding and radiance-field MLP | [`nerf/encoding.py`](nerf/encoding.py), [`nerf/model.py`](nerf/model.py) |
+| Stratified and hierarchical sampling | [`nerf/sampling.py`](nerf/sampling.py) |
+| Differentiable volume rendering | [`nerf/rendering.py`](nerf/rendering.py) |
+| Training and checkpointing | [`train.py`](train.py), [`nerf/checkpoint.py`](nerf/checkpoint.py) |
+| Held-out image metrics and camera orbit | [`evaluate.py`](evaluate.py), [`render_video.py`](render_video.py) |
 
-Rendering reloads the latest checkpoint. By default it renders the dataset's test camera poses and writes a video under `logs/experiments/<experiment>/test_output_<step>/`.
-
-## Monitor training
-
-From the repository root:
-
-```bash
-tensorboard --logdir logs/tensorboard
-```
-
-## Code overview
-
-| File | Purpose |
-| --- | --- |
-| `code/model.py` | Coarse/fine MLPs, chunked inference, optimizer and checkpoint loading |
-| `code/encoders.py` | Sinusoidal position and direction encoding |
-| `code/rays.py` | Camera rays and coarse/fine sampling |
-| `code/raw2outputs.py` | Volume integration and compositing |
-| `code/render.py` | Ray rendering and chunk aggregation |
-| `code/batching.py` | Sampling training rays from images |
-| `code/load_blender.py` | Blender images, poses, and camera metadata |
-| `code/run.py` | Training loop, checkpoint saving, and logging |
-| `code/generate_output.py` | Rendering image sequences and video export |
-| `code/testing.py` | Checkpoint evaluation |
-| `code/validate.py` | Validation loss and PSNR |
-| `code/params.py` | Hyperparameters and command-line arguments |
-| `code/get_device.py` | CUDA/MPS/CPU selection |
-
-## Implementation notes
-
-Optional hash encodings and all-image batching are unfinished; use the default sinusoidal encodings and single-image ray sampling. This repository does not claim new benchmark results or a newly reproduced training run.
+Run `python -m pytest -q` for checks of ray conventions, sampling, volume rendering, checkpoint resume, and the generated-scene workflow.
 
 ## References
 
-- [NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis](https://arxiv.org/abs/2003.08934)
-- [Original NeRF implementation](https://github.com/bmild/nerf)
-- [NeRF PyTorch](https://github.com/yenchenlin/nerf-pytorch)
-- [HashNeRF PyTorch](https://github.com/yashbhalgat/HashNeRF-pytorch)
-- [NeRF with PyTorch Lightning](https://github.com/kwea123/nerf_pl)
+- Mildenhall et al., *NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis*, ECCV 2020. [Paper](https://arxiv.org/abs/2003.08934) · [Authors' code](https://github.com/bmild/nerf)
+- [yenchenlin/nerf-pytorch](https://github.com/yenchenlin/nerf-pytorch), a PyTorch reference used to cross-check conventions.
 
-Upstream attribution comments are retained in the code. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the license covering the cited upstream code.
-
-Copyright (c) 2026 Yawen Zheng for project-owned portions, excluding third-party code covered by its respective notices.
-
+The [earlier implementation and its original instructions](https://github.com/yawen891115/nerf-novel-view-synthesis/tree/25fe4d69078ff7581e478629b3da192b1c854fca) remain available. The root commands above are for the configurable implementation. See [Third-party notices](THIRD_PARTY_NOTICES.md) for upstream attribution.

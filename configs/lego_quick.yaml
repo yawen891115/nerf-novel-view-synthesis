@@ -1,0 +1,15 @@
+# Cheaper first run: 400x400 images, 64 + 64 samples, 100k steps (the official example
+# config_lego.txt, with the learning rate reaching 5e-5 at the end of the shorter run).
+# Use it to check everything works on the GPU before the paper run; do NOT report
+# its numbers as the paper setting.
+expname: lego_quick
+datadir: data/nerf_synthetic/lego
+half_res: true
+n_samples: 64
+n_importance: 64
+n_rand: 1024
+n_iters: 100000
+lrate_decay_steps: 100000
+precrop_iters: 500
+i_img: 2500
+i_weights: 5000

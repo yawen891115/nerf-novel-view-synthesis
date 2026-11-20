@@ -1,0 +1,24 @@
+# Paper setting for the Blender "lego" scene (bmild/nerf paper_configs/blender_config.txt):
+# full 800x800 resolution, 64 coarse + 128 fine samples, 1024 rays per step,
+# learning rate 5e-4 -> 5e-5 exponentially over 500k steps.
+# Paper result to compare against (per-scene Table 4): PSNR 32.54, SSIM 0.961, LPIPS 0.050.
+expname: lego_paper
+datadir: data/nerf_synthetic/lego
+half_res: false
+white_bkgd: true
+near: 2.0
+far: 6.0
+n_samples: 64
+n_importance: 128
+n_rand: 1024
+n_iters: 500000
+lrate: 5.0e-4
+lrate_final: 5.0e-5
+lrate_decay_steps: 500000
+precrop_iters: 500
+precrop_frac: 0.5
+ray_chunk: 8192
+point_chunk: 16384
+i_print: 100
+i_img: 5000
+i_weights: 10000
